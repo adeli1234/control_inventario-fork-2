@@ -1,0 +1,89 @@
+# Mini centro de datos: nginx + app Flask (Python) + MariaDB + Grafana
+# Uso:  cp .env.example .env   (editar contraseñas)   y luego   docker compose up -d --build
+
+services:
+  db:
+    image: mariadb:11.4
+    container_name: mcd_db
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      # Los usa docker/db/03_usuarios.sh para crear los usuarios de la app y de Grafana
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_GRAFANA_USER: ${DB_GRAFANA_USER}
+      DB_GRAFANA_PASSWORD: ${DB_GRAFANA_PASSWORD}
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "127.0.0.1:3306:3306"          # puerto estándar de MariaDB/MySQL (solo accesible desde esta máquina)
+    volumes:
+      - db_data:/var/lib/mysql         # VOLUMEN: aquí persisten los datos
+      # Scripts que se ejecutan SOLO la primera vez (en orden por número):
+      - ./database/panel_tienda_multitienda.sql:/docker-entrypoint-initdb.d/01_panel_tienda.sql:ro
+      - ./database/actualizar_bd.sql:/docker-entrypoint-initdb.d/02_actualizar_bd.sql:ro
+      - ./docker/db/03_usuarios.sh:/docker-entrypoint-initdb.d/03_usuarios.sh:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks: [red_interna]
+
+  app:
+    build: .                           # usa el Dockerfile de esta carpeta
+    container_name: mcd_app
+    restart: unless-stopped
+    environment:
+      DB_HOST: db                      # el nombre del servicio es su "dirección" dentro de la red
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      SECRET_KEY: ${SECRET_KEY}
+    depends_on:
+      db:
+        condition: service_healthy     # la app espera a que MariaDB esté lista
+    expose:
+      - "8000"                         # solo visible dentro de la red; el público entra por nginx
+    networks: [red_interna]
+
+  web:
+    image: nginx:1.27-alpine
+    container_name: mcd_web
+    restart: unless-stopped
+    depends_on: [app]
+    ports:
+      - "80:80"                        # puerto estándar HTTP
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./static:/var/www/static:ro    # archivos CSS/JS servidos directo por nginx
+    networks: [red_interna]
+
+  grafana:
+    image: grafana/grafana-oss:11.2.0
+    container_name: mcd_grafana
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      DB_GRAFANA_USER: ${DB_GRAFANA_USER}
+      DB_GRAFANA_PASSWORD: ${DB_GRAFANA_PASSWORD}
+    ports:
+      - "3000:3000"                    # puerto estándar de Grafana
+    volumes:
+      - grafana_data:/var/lib/grafana                     # VOLUMEN: dashboards y configuración
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    networks: [red_interna]
+
+volumes:
+  db_data:
+  grafana_data:
+
+networks:
+  red_interna:
