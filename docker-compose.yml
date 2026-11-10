@@ -16,7 +16,7 @@ services:
       DB_GRAFANA_PASSWORD: ${DB_GRAFANA_PASSWORD}
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     ports:
-      - "127.0.0.1:3306:3306"          # puerto estándar de MariaDB/MySQL (solo accesible desde esta máquina)
+      - "127.0.0.1:3310:3306"          # puerto estándar de MariaDB/MySQL (solo accesible desde esta máquina)
     volumes:
       - db_data:/var/lib/mysql         # VOLUMEN: aquí persisten los datos
       # Scripts que se ejecutan SOLO la primera vez (en orden por número):
